@@ -17,6 +17,10 @@ data class VerifiedPayloads(
 
 class PayloadRepository(private val context: Context) {
     fun loadTargets(): List<TargetProfile> {
+        val override = File(context.filesDir, "targets-v2.override.json")
+        if (override.isFile) {
+            return SupportManifest.parse(override.readBytes()).targets
+        }
         val commit = resolveMainCommit()
         val manifestBytes = downloadBytes(rawUrl(commit, "support/targets-v2.json"), MAX_MANIFEST_BYTES)
         return SupportManifest.parse(manifestBytes).targets.map { profile -> profile.copy(
@@ -62,6 +66,28 @@ class PayloadRepository(private val context: Context) {
         label: String,
         onProgress: (String) -> Unit,
     ): File {
+        val override = File(
+            context.filesDir,
+            "payload-overrides/${destination.parentFile?.name}/${destination.name}",
+        )
+        if (override.isFile) {
+            require(override.length() == artifact.size) {
+                "Local override size mismatch for $label: ${override.length()} != ${artifact.size}"
+            }
+            onProgress("Using local override for $label")
+            override.inputStream().use { input ->
+                val temporary = File(destination.parentFile, "${destination.name}.part")
+                FileOutputStream(temporary).use { output ->
+                    input.copyTo(output)
+                    output.fd.sync()
+                }
+                if (destination.exists()) destination.delete()
+                require(temporary.renameTo(destination)) {
+                    context.getString(R.string.repo_finalize_failed, label)
+                }
+            }
+            return destination
+        }
         onProgress(context.getString(R.string.repo_downloading, label))
         val temporary = File(destination.parentFile, "${destination.name}.part")
         val connection = open(artifact.url)

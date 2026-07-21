@@ -174,6 +174,14 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             helper.absolutePath,
             logFile.absolutePath,
         ).redirectErrorStream(true)
+        if (File(app.filesDir, "diagnostic-stop-before-sched").isFile) {
+            processBuilder.environment()["RMG_DIAGNOSTIC_STOP_BEFORE_SCHED"] = "1"
+            appendLog("[*] Diagnostic mode: stop before sched_setattr")
+        }
+        if (File(app.filesDir, "diagnostic-one-attempt").isFile) {
+            processBuilder.environment()["EXPLOIT_ATTEMPTS"] = "1"
+            appendLog("[*] Diagnostic mode: limit exploit to one attempt")
+        }
         cachedP0Offset(bootToken)?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
         val process = processBuilder.start()
 
