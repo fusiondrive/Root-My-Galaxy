@@ -193,6 +193,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             }
             appendLog("[*] Diagnostic mode: one P0 gate attempt; stop before physical scan")
         }
+        if (File(app.filesDir, "diagnostic-p0-scan").isFile) {
+            processBuilder.environment().apply {
+                put("EXPLOIT_ATTEMPTS", "1")
+                put("SLIDE_ONLY", "1")
+                put("P0_ONLY", "1")
+                remove("P0_ORACLE_GATE_DIAG")
+                put("P0_ATTEMPT_TIMEOUT_SEC", "30")
+                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "45")
+            }
+            appendLog("[*] Diagnostic mode: one P0 fingerprint scan; stop before root stage")
+        }
         cachedP0Offset(bootToken)?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
         val process = processBuilder.start()
 
