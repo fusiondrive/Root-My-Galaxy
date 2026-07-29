@@ -182,6 +182,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             processBuilder.environment()["EXPLOIT_ATTEMPTS"] = "1"
             appendLog("[*] Diagnostic mode: limit exploit to one attempt")
         }
+        if (File(app.filesDir, "diagnostic-p0-gate").isFile) {
+            processBuilder.environment().apply {
+                put("EXPLOIT_ATTEMPTS", "1")
+                put("SLIDE_ONLY", "1")
+                put("P0_ONLY", "1")
+                put("P0_ORACLE_GATE_DIAG", "1")
+                put("P0_ATTEMPT_TIMEOUT_SEC", "20")
+                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "30")
+            }
+            appendLog("[*] Diagnostic mode: one P0 gate attempt; stop before physical scan")
+        }
         cachedP0Offset(bootToken)?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
         val process = processBuilder.start()
 
