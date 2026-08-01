@@ -179,6 +179,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
         val cachedP0Offset = cachedP0Offset(bootToken)
+        val cachedVirtualBase = cachedVirtualBase(bootToken)
         require(!rootOnly || cachedP0Offset != null) {
             "Diagnostic root-only requires a P0 offset cached for the current boot"
         }
@@ -239,6 +240,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             appendLog("[*] Diagnostic mode: stop after FOPS page prepare; skip FOPS trigger")
         }
         cachedP0Offset?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
+        cachedVirtualBase?.let { processBuilder.environment()[VIRTUAL_BASE_ENV] = it }
         val process = processBuilder.start()
 
         try {
@@ -249,6 +251,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 val rawLog = logFile.readTextIfPresent()
                 if (rawLog != lastRawLog) {
                     cacheP0Offset(bootToken, rawLog)
+                    cacheVirtualBase(bootToken, rawLog)
                     publishExploitLog(logPrefix, rawLog)
                     lastRawLog = rawLog
                     lastProgressAt = SystemClock.elapsedRealtime()
@@ -266,6 +269,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             val exitCode = process.waitFor()
             val rawLog = logFile.readTextIfPresent()
             cacheP0Offset(bootToken, rawLog)
+            cacheVirtualBase(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog)
             val earlyOutput = process.inputStream.bufferedReader().use { it.readText() }.trim()
             if (fopsStopAfterPrepare && rawLog.contains(FOPS_PREPARE_STOP_MARKER)) {
@@ -367,6 +371,31 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             .apply()
     }
 
+    private fun cachedVirtualBase(bootToken: String?): String? {
+        if (bootToken == null) return null
+        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
+        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) != bootToken) return null
+        return stored.getString(P0_CACHE_VIRTUAL_BASE, null)
+    }
+
+    private fun cacheVirtualBase(bootToken: String?, log: String) {
+        if (bootToken == null) return
+        val match = VIRTUAL_BASE_PATTERN.findAll(log).lastOrNull() ?: return
+        val base = match.groupValues[1].toULongOrNull(16) ?: return
+        if (base < VIRTUAL_BASE_MIN || base > VIRTUAL_BASE_MAX ||
+            base and VIRTUAL_BASE_MASK != 0uL
+        ) return
+        val value = "0x${base.toString(16)}"
+        val stored = app.getSharedPreferences(P0_CACHE, Application.MODE_PRIVATE)
+        if (stored.getString(P0_CACHE_BOOT_TOKEN, null) == bootToken &&
+            stored.getString(P0_CACHE_VIRTUAL_BASE, null) == value
+        ) return
+        stored.edit()
+            .putString(P0_CACHE_BOOT_TOKEN, bootToken)
+            .putString(P0_CACHE_VIRTUAL_BASE, value)
+            .apply()
+    }
+
     private fun helperFile() = File(app.applicationInfo.nativeLibraryDir, "libcve43499root.so")
 
     private fun runHelper(vararg arguments: String): CommandResult {
@@ -435,15 +464,23 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_CACHE = "p0_cache"
         private const val P0_CACHE_BOOT_TOKEN = "kernel_boot_id"
         private const val P0_CACHE_OFFSET = "offset"
+        private const val P0_CACHE_VIRTUAL_BASE = "virtual_base"
         private const val P0_OFFSET_ENV = "SLIDE_P0_OFFSET"
+        private const val VIRTUAL_BASE_ENV = "SLIDE_VIRTUAL_BASE"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
+        private val VIRTUAL_BASE_MIN = 0xffffffd080000000uL
+        private val VIRTUAL_BASE_MAX = 0xfffffff07fe00000uL
+        private val VIRTUAL_BASE_MASK = 0x1fffffuL
         private const val FOPS_PREPARE_STOP_MARKER =
             "diagnostic stop after fops prepare; trigger not entered"
         private val LOG_POLL_INTERVAL = 250.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
         private val P0_OFFSET_PATTERN = Regex(
             "slide-kaslr-ok[^\\n]*slide=([0-9a-fA-F]{16})",
+        )
+        private val VIRTUAL_BASE_PATTERN = Regex(
+            "slide-kaslr-ok[^\\n]*base=([0-9a-fA-F]{16})[^\\n]*virtual_slide=",
         )
 
         private fun stripAnsi(value: String): String = ANSI_ESCAPE.replace(value, "").replace("\r", "")
