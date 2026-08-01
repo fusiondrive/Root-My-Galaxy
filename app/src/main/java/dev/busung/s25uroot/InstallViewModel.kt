@@ -126,6 +126,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
             val rootOnly = File(app.filesDir, "diagnostic-root-only").isFile
+            val fopsStopAfterPrepare =
+                File(app.filesDir, "diagnostic-fops-stop-after-prepare").isFile
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -145,9 +147,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 appendLog(app.getString(R.string.log_download_verified))
 
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
-                executeExploit(payloads.exploit, rootOnly)
+                executeExploit(payloads.exploit, rootOnly, fopsStopAfterPrepare)
 
-                require(!rootOnly) {
+                require(!rootOnly && !fopsStopAfterPrepare) {
                     "Diagnostic root-only stop before KernelSU staging"
                 }
 
@@ -165,7 +167,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun executeExploit(payload: File, rootOnly: Boolean = false) {
+    private suspend fun executeExploit(
+        payload: File,
+        rootOnly: Boolean = false,
+        fopsStopAfterPrepare: Boolean = false,
+    ) {
         val logFile = File(app.filesDir, "exploit.log")
         logFile.delete()
         val helper = helperFile()
@@ -175,6 +181,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         val cachedP0Offset = cachedP0Offset(bootToken)
         require(!rootOnly || cachedP0Offset != null) {
             "Diagnostic root-only requires a P0 offset cached for the current boot"
+        }
+        require(!fopsStopAfterPrepare || rootOnly) {
+            "FOPS prepare diagnostic requires the root-only safety boundary"
         }
         val processBuilder = ProcessBuilder(
             helper.absolutePath,
@@ -225,6 +234,10 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             }
             appendLog("[*] Diagnostic mode: one root attempt; stop before KernelSU staging")
         }
+        if (fopsStopAfterPrepare) {
+            processBuilder.environment()["FOPS_DIAGNOSTIC_STOP_AFTER_PREPARE"] = "1"
+            appendLog("[*] Diagnostic mode: stop after FOPS page prepare; skip FOPS trigger")
+        }
         cachedP0Offset?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
         val process = processBuilder.start()
 
@@ -255,6 +268,9 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             cacheP0Offset(bootToken, rawLog)
             publishExploitLog(logPrefix, rawLog)
             val earlyOutput = process.inputStream.bufferedReader().use { it.readText() }.trim()
+            if (fopsStopAfterPrepare && rawLog.contains(FOPS_PREPARE_STOP_MARKER)) {
+                error("FOPS prepare diagnostic completed; FOPS trigger was not entered")
+            }
             require(exitCode == 0) {
                 app.getString(
                     R.string.error_payload_exit,
@@ -422,6 +438,8 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         private const val P0_OFFSET_ENV = "SLIDE_P0_OFFSET"
         private const val P0_OFFSET_MAX = 0x1f0000L
         private const val P0_OFFSET_MASK = 0xffffL
+        private const val FOPS_PREPARE_STOP_MARKER =
+            "diagnostic stop after fops prepare; trigger not entered"
         private val LOG_POLL_INTERVAL = 250.milliseconds
         private val ANSI_ESCAPE = Regex("\u001B\\[[0-?]*[ -/]*[@-~]")
         private val P0_OFFSET_PATTERN = Regex(
