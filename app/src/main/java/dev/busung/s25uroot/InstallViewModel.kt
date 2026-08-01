@@ -125,6 +125,7 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         if (installJob?.isActive == true || mutableState.value.phase == InstallPhase.Installed) return
         discoveryJob?.cancel()
         installJob = viewModelScope.launch(Dispatchers.IO) {
+            val rootOnly = File(app.filesDir, "diagnostic-root-only").isFile
             mutableState.value = InstallUiState(
                 phase = InstallPhase.Checking,
                 probeOutput = mutableState.value.probeOutput,
@@ -144,7 +145,11 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
                 appendLog(app.getString(R.string.log_download_verified))
 
                 setPhase(InstallPhase.Exploiting, app.getString(R.string.status_exploit_running))
-                executeExploit(payloads.exploit)
+                executeExploit(payloads.exploit, rootOnly)
+
+                require(!rootOnly) {
+                    "Diagnostic root-only stop before KernelSU staging"
+                }
 
                 setPhase(InstallPhase.LoadingKernelSu, app.getString(R.string.status_ksu_loading))
                 installKernelSu(payloads)
@@ -160,13 +165,17 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private suspend fun executeExploit(payload: File) {
+    private suspend fun executeExploit(payload: File, rootOnly: Boolean = false) {
         val logFile = File(app.filesDir, "exploit.log")
         logFile.delete()
         val helper = helperFile()
         require(helper.canExecute()) { app.getString(R.string.error_helper_unavailable) }
         val logPrefix = mutableState.value.log
         val bootToken = currentBootToken()
+        val cachedP0Offset = cachedP0Offset(bootToken)
+        require(!rootOnly || cachedP0Offset != null) {
+            "Diagnostic root-only requires a P0 offset cached for the current boot"
+        }
         val processBuilder = ProcessBuilder(
             helper.absolutePath,
             "--run-payload",
@@ -204,7 +213,19 @@ class InstallViewModel(application: Application) : AndroidViewModel(application)
             }
             appendLog("[*] Diagnostic mode: one P0 fingerprint scan; stop before root stage")
         }
-        cachedP0Offset(bootToken)?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
+        if (rootOnly) {
+            processBuilder.environment().apply {
+                put("EXPLOIT_ATTEMPTS", "1")
+                remove("SLIDE_ONLY")
+                remove("P0_ONLY")
+                remove("P0_ORACLE_GATE_DIAG")
+                remove("RMG_DIAGNOSTIC_STOP_BEFORE_SCHED")
+                put("P0_ATTEMPT_TIMEOUT_SEC", "60")
+                put("EXPLOIT_ATTEMPT_TIMEOUT_SEC", "60")
+            }
+            appendLog("[*] Diagnostic mode: one root attempt; stop before KernelSU staging")
+        }
+        cachedP0Offset?.let { processBuilder.environment()[P0_OFFSET_ENV] = it }
         val process = processBuilder.start()
 
         try {
