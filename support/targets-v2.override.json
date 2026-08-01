@@ -14,12 +14,12 @@
       "abi": "arm64-v8a",
       "pageSize": 4096,
       "exploit": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/artifacts/a36xq-A366WVLS3AYG1/cve-2026-43499-app.so",
+        "url": "https://raw.githubusercontent.com/fusiondrive/CVE-2026-43499-A36/main/artifacts/a36xq-A366WVLS3AYG1/cve-2026-43499-app.so",
         "size": 128688
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/diagnostic-placeholder",
-        "size": 0,
+        "url": "https://raw.githubusercontent.com/fusiondrive/CVE-2026-43499-A36/main/kernelsu/ksud-A366WVLS3AYG1-kdp",
+        "size": 4889120,
         "kmi": "android15-6.6",
         "managerPackage": "me.weishu.kernelsu"
       }
